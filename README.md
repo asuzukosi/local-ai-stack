@@ -2,7 +2,7 @@
 
 This consists of a fairly comprehensive stack of AI tools that you can run locally for whatever you want.
 
-Take note that this will use 4 GPUs as is. I think you'll need at least 2 for a decent experience and abiliyt to run LLMs and image models. I haven't tested with one GPU, but it may work. To adjust the number of GPUs, change the `device_ids` under `localai` and `comfyui`. Feel free to remove whatever you don't want to use.
+Take note that this will use 4 GPUs as is. I think you'll need at least 2 for a decent experience and ability to run LLMs and image models. I haven't tested with one GPU, but it may work. To adjust the number of GPUs, change the `device_ids` under `localai` and `comfyui`. Feel free to remove whatever you don't want to use.
 
 ## URL Reference
 
