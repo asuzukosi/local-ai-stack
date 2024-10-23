@@ -1,0 +1,225 @@
+x-n8n: &service-n8n
+  image: n8nio/n8n:latest
+  environment:
+    - DB_TYPE=postgresdb
+    - DB_POSTGRESDB_HOST=postgres
+    - DB_POSTGRESDB_USER=${POSTGRES_USER}
+    - DB_POSTGRESDB_PASSWORD=${POSTGRES_PASSWORD}
+    - N8N_DIAGNOSTICS_ENABLED=false
+    - N8N_PERSONALIZATION_ENABLED=false
+    - WEBHOOK_URL=https://n8n.crypto-tech.cloud
+    - N8N_ENCRYPTION_KEY
+    - N8N_USER_MANAGEMENT_JWT_SECRET
+    - N8N_SECURE_COOKIE
+    - NODE_FUNCTION_ALLOW_BUILTIN=*
+    - NODE_FUNCTION_ALLOW_EXTERNAL=*
+  links:
+    - postgres
+
+x-logging: &logging
+  logging:
+    driver: 'json-file'
+    options:
+      max-size: 100m
+      max-file: '2'
+
+services:
+
+  localai:
+    container_name: localai
+    hostname: localai
+    image: localai/localai:latest-gpu-nvidia-cuda-12
+    restart: unless-stopped
+    # ports:
+    #   - 8080:8080
+    environment:
+      - MODELS_PATH=/models
+      - TOKEN=your-token-here
+      - FEDERATED=true
+      - LOCALAI_P2P=true
+      - LOCALAI_PARALLEL_REQUESTS=true
+    #  - DEBUG=true
+    volumes:
+      - ./models:/models:cached
+      - ./images/:/tmp/generated/images/
+    network_mode: host # couldn't get p2p to work without this.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ['1','2','3']
+              capabilities: [gpu]
+    <<: *logging
+  
+  llm-proxy:
+    container_name: llm-proxy
+    hostname: llm-proxy
+    image: ghcr.io/j4ys0n/llm-proxy:1.4.7
+    restart: unless-stopped
+    ports:
+      - 3001:3001
+    env_file:
+      - ./.llm-proxy.env
+    volumes:
+      - ./.llm-proxy.env:/usr/src/app/.env
+    <<: *logging
+
+  # open webui start
+
+  webui:
+    container_name: webui
+    hostname: webui
+    image: ghcr.io/open-webui/open-webui:main
+    restart: unless-stopped
+    ports:
+      - 3000:3000
+    environment:
+      - PORT=3000
+      - OPENAI_API_BASE=http://llm-proxy:8080/v1
+    volumes:
+      - ./open-webui:/app/backend/data
+    <<: *logging
+
+  redis:
+    container_name: redis
+    hostname: redis
+    image: docker.io/valkey/valkey:8-bookworm
+    restart: unless-stopped
+    command: valkey-server --save 30 1 --loglevel warning
+    volumes:
+      - ./valkey-data:/data
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETGID
+      - SETUID
+      - DAC_OVERRIDE
+    <<: *logging
+
+  searxng:
+    container_name: searxng
+    hostname: searxng
+    image: docker.io/searxng/searxng:latest
+    restart: unless-stopped
+    ports:
+      - 8081:8080
+    environment:
+      - SEARXNG_BASE_URL=https://${SEARXNG_HOSTNAME:-localhost}/
+      - UWSGI_WORKERS=${SEARXNG_UWSGI_WORKERS:-4}
+      - UWSGI_THREADS=${SEARXNG_UWSGI_THREADS:-4}
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+    volumes:
+      - ./searxng:/etc/searxng:rw
+    <<: *logging
+
+  # open webui end
+  # comfyui start
+
+  stable-diffusion-download:
+    container_name: stable-diffusion-download
+    build: ./stable-diffusion-webui-docker/services/download/
+    image: comfy-download
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+    volumes:
+      - ./stable-diffusion-webui-docker/data:/data
+    <<: *logging
+
+  comfy-ui:
+    container_name: comfy-ui
+    hostname: comfy-ui
+    build: ./stable-diffusion-webui-docker/services/comfy/
+    image: comfy-ui
+    restart: unless-stopped
+    ports:
+      - 7860:7860
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - CLI_ARGS=
+    volumes:
+      - ./stable-diffusion-webui-docker/data:/data
+      - ./stable-diffusion-webui-docker/output:/output
+    stop_signal: SIGKILL
+    tty: true
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ['0']
+              capabilities: [compute, utility]
+    <<: *logging
+  
+  # comfyui end
+  # n8n start
+
+  postgres:
+    container_name: postgres
+    hostname: postgres
+    image: postgres:16-alpine
+    restart: unless-stopped
+    ports:
+      - 5432:5432
+    environment:
+      - POSTGRES_USER
+      - POSTGRES_PASSWORD
+      - POSTGRES_DB
+    volumes:
+      - ./postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -h localhost -U ${POSTGRES_USER} -d ${POSTGRES_DB}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    <<: *logging
+
+  qdrant:
+    container_name: qdrant
+    hostname: qdrant
+    image: qdrant/qdrant
+    restart: unless-stopped
+    ports:
+      - 6333:6333
+    volumes:
+      - ./qdrant:/qdrant/storage
+    <<: *logging
+
+  n8n-import:
+    <<: [*service-n8n, *logging]
+    container_name: n8n-import
+    entrypoint: /bin/sh
+    command:
+      - "-c"
+      - "n8n import:credentials --separate --input=/backup/credentials && n8n import:workflow --separate --input=/backup/workflows"
+    volumes:
+      - ./n8n/backup:/backup
+    depends_on:
+      postgres:
+        condition: service_healthy
+  
+  n8n:
+    <<: [*service-n8n, *logging]
+    container_name: n8n
+    hostname: n8n
+    restart: unless-stopped
+    ports:
+      - 5678:5678
+    volumes:
+      - ./n8n/data:/home/node/.n8n
+      - ./n8n/backup:/backup
+      - ./shared:/data/shared # this is only if you want to be able to do anything with local files
+    depends_on:
+      postgres:
+        condition: service_healthy
+      n8n-import:
+        condition: service_completed_successfully
+
+  # n8n end
