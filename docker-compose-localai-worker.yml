@@ -1,0 +1,24 @@
+services:
+  localai:
+    container_name: localai
+    hostname: localai
+    image: localai/localai:latest-gpu-nvidia-cuda-12
+    environment:
+      - MODELS_PATH=/models
+      - TOKEN=same-token-here
+    #  - DEBUG=true
+    volumes:
+      - ./models:/models:cached
+      - ./images/:/tmp/generated/images/
+    network_mode: host
+    entrypoint:
+      - "/aio/entrypoint.sh"
+      - "worker"
+      - "p2p-llama-cpp-rpc"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ['0']
+              capabilities: [gpu]
