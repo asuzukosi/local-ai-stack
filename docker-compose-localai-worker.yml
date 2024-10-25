@@ -12,7 +12,7 @@ services:
       - ./images/:/tmp/generated/images/
     network_mode: host
     entrypoint:
-      - "/aio/entrypoint.sh"
+      - "/build/entrypoint.sh"
       - "worker"
       - "p2p-llama-cpp-rpc"
     deploy:
