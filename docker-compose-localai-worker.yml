@@ -12,9 +12,10 @@ services:
       - ./images/:/tmp/generated/images/
     network_mode: host
     entrypoint:
-      - "/build/entrypoint.sh"
-      - "worker"
-      - "p2p-llama-cpp-rpc"
+      - /build/entrypoint.sh
+      - worker
+      - p2p-llama-cpp-rpc
+      - --llama-cpp-args=-m 16380 # set this to the VRAM size in MB
     deploy:
       resources:
         reservations:
